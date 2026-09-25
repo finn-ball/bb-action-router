@@ -36,10 +36,9 @@ struct Config {
   int host_uid = 1000;
   int host_gid = 1000;
 
-  // Top-level entries of / that are left alone: not removed as stale, not used
-  // as an overlay mount point and not hidden from the action. The built-in
-  // entries are the ones the container runtime mounts; keep-dirs in the config
-  // file are added to them.
+  // Top-level directories of / that are bind-mounted into the action's root.
+  // The built-in entries are the ones the container runtime mounts; keep-dirs
+  // in the config file are added to them.
   //
   // A deployment has to add the top-level directory that holds the worker's
   // build directory (the action's working directory lives in there), since

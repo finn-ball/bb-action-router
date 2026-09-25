@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -57,9 +59,42 @@ func runHelper(helperPath, fetcherSocket, imageRef string, extraArgs []string, c
 	return strings.TrimSpace(string(out)), err
 }
 
-func startMockFetcher(socketPath, dockerRoot string) (func(), error) {
+func checkConcurrent(helperPath, socketPath string, differentLayouts bool) {
+	const actions = 16
+	failures := 0
+	var firstFailure string
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for i := 0; i < actions; i++ {
+		imageRef := "test-image"
+		if differentLayouts && i%2 == 1 {
+			imageRef = "other-image"
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			out, err := runHelper(helperPath, socketPath, imageRef, []string{"--no-network-isolation"},
+				"/bin/integration_test", "--probe=check-image", imageRef)
+			if err != nil || out != "OK" {
+				mu.Lock()
+				failures++
+				if firstFailure == "" {
+					firstFailure = fmt.Sprintf("%s: %v: %s", imageRef, err, out)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	check(fmt.Sprintf("%d concurrent actions succeeded (failures: %d, first: %s)", actions, failures, firstFailure), failures == 0)
+}
+
+func startMockFetcher(socketPath, dockerRoot, otherDockerRoot string) (func(), error) {
 	self, _ := os.Executable()
-	cmd := exec.Command(self, "--mock-fetcher", socketPath, dockerRoot)
+	cmd := exec.Command(self, "--mock-fetcher", socketPath, dockerRoot, otherDockerRoot)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -130,6 +165,7 @@ func runTests() {
 	helperPath := "/bin/bb_chroot_helper"
 	testDir := "/var/chroot_integration_test"
 	dockerRoot := filepath.Join(testDir, "docker_root")
+	otherDockerRoot := filepath.Join(testDir, "other_docker_root")
 	socketPath := filepath.Join(testDir, "fetcher.sock")
 
 	os.MkdirAll(testDir, 0o755)
@@ -137,6 +173,18 @@ func runTests() {
 
 	if err := setupDockerRoot(dockerRoot); err != nil {
 		die(fmt.Sprintf("setup docker root: %v", err))
+	}
+	if err := setupDockerRoot(otherDockerRoot); err != nil {
+		die(fmt.Sprintf("setup other docker root: %v", err))
+	}
+	if err := os.Remove(filepath.Join(otherDockerRoot, "sbin")); err != nil {
+		die(fmt.Sprintf("remove other image sbin: %v", err))
+	}
+	if err := os.WriteFile(filepath.Join(otherDockerRoot, "sbin"), []byte("other-image-file"), 0o644); err != nil {
+		die(fmt.Sprintf("create other image sbin: %v", err))
+	}
+	if err := os.WriteFile(filepath.Join(otherDockerRoot, "etc/image_marker"), []byte("other-image"), 0o644); err != nil {
+		die(fmt.Sprintf("create other image marker: %v", err))
 	}
 
 	// Write known host /etc files.
@@ -147,11 +195,17 @@ func runTests() {
 
 	// Copy ourselves into the docker root so we're available after overlay to run probes.
 	self, _ := os.Executable()
-	selfDst := filepath.Join(dockerRoot, "bin/integration_test")
-	data, _ := os.ReadFile(self)
-	os.WriteFile(selfDst, data, 0o755)
+	data, err := os.ReadFile(self)
+	if err != nil {
+		die(fmt.Sprintf("read test executable: %v", err))
+	}
+	for _, root := range []string{dockerRoot, otherDockerRoot} {
+		if err := os.WriteFile(filepath.Join(root, "bin/integration_test"), data, 0o755); err != nil {
+			die(fmt.Sprintf("copy test executable to %s: %v", root, err))
+		}
+	}
 
-	cleanupFetcher, err := startMockFetcher(socketPath, dockerRoot)
+	cleanupFetcher, err := startMockFetcher(socketPath, dockerRoot, otherDockerRoot)
 	if err != nil {
 		die(fmt.Sprintf("start mock fetcher: %v", err))
 	}
@@ -185,7 +239,7 @@ func runTests() {
 	out, _ = runHelper(helperPath, socketPath, "test-image",
 		[]string{"--no-network-isolation"},
 		"/bin/integration_test", "--probe=mkdir", "/foo")
-	checkOutput("Cannot write to /foo (unprivileged)", "error: mkdir /foo: permission denied", out)
+	checkOutput("Cannot write to /foo (read-only root)", "error: mkdir /foo: read-only file system", out)
 
 	fmt.Println("\n=== Test 5: HOME=/tmp ===")
 	out, _ = runHelper(helperPath, socketPath, "test-image",
@@ -253,6 +307,19 @@ func runTests() {
 		strings.Contains(out, "escapes docker_root"))
 	os.Remove(escapePath)
 
+	fmt.Println("\n=== Concurrent actions using the same image ===")
+	checkConcurrent(helperPath, socketPath, false)
+
+	fmt.Println("\n=== Concurrent actions using different image layouts ===")
+	checkConcurrent(helperPath, socketPath, true)
+
+	stageEntries, err := os.ReadDir("/var/bb_chroot_helper")
+	check(fmt.Sprintf("Staging mount point is empty (got: %v)", stageEntries), err == nil && len(stageEntries) == 0)
+	for _, name := range []string{"sbin", "top_level_file"} {
+		_, err := os.Lstat("/" + name)
+		check(fmt.Sprintf("No image mount point left in runner root at /%s", name), os.IsNotExist(err))
+	}
+
 	fmt.Printf("\n================================\n")
 	fmt.Printf("Results: %d passed, %d failed\n", passed, failed)
 	fmt.Printf("================================\n")
@@ -288,6 +355,8 @@ func main() {
 		cmdProbeMkdirTest()
 	case "--probe=interfaces":
 		cmdProbeInterfaces()
+	case "--probe=check-image":
+		cmdProbeCheckImage()
 	default:
 		die("unsupported arg")
 	}
@@ -299,10 +368,11 @@ func die(msg string) {
 }
 
 func cmdMockFetcher() {
-	if len(os.Args) != 4 {
-		die("Usage: integration_test --mock-fetcher <socket_path> <docker_root>")
+	if len(os.Args) != 5 {
+		die("Usage: integration_test --mock-fetcher <socket_path> <docker_root> <other_docker_root>")
 	}
-	socketPath, dockerRoot := os.Args[2], os.Args[3]
+	socketPath := os.Args[2]
+	dockerRoots := map[string]string{"test-image": os.Args[3], "other-image": os.Args[4]}
 
 	os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
@@ -311,7 +381,7 @@ func cmdMockFetcher() {
 	}
 	defer listener.Close()
 
-	fmt.Fprintf(os.Stderr, "mock_fetcher: listening on %s, serving %s\n", socketPath, dockerRoot)
+	fmt.Fprintf(os.Stderr, "mock_fetcher: listening on %s\n", socketPath)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -326,8 +396,10 @@ func cmdMockFetcher() {
 				return
 			}
 			parts := strings.SplitN(strings.TrimSpace(line), " ", 2)
-			if len(parts) == 2 && parts[0] == "ACQUIRE" {
-				fmt.Fprintf(c, "OK %s\n", dockerRoot)
+			if len(parts) == 2 && parts[0] == "ACQUIRE" && dockerRoots[parts[1]] != "" {
+				fmt.Fprintf(c, "OK %s\n", dockerRoots[parts[1]])
+				// Hold the image lease until the helper closes the socket.
+				io.Copy(io.Discard, c)
 			} else {
 				fmt.Fprintf(c, "ERROR bad request\n")
 			}
@@ -348,6 +420,26 @@ func cmdProbeReadFile() {
 		return
 	}
 	fmt.Print(strings.TrimSpace(string(data)))
+}
+
+func cmdProbeCheckImage() {
+	if len(os.Args) != 3 {
+		die("Usage: integration_test --probe=check-image <image_ref>")
+	}
+	marker, err := os.ReadFile("/etc/image_marker")
+	if err != nil {
+		die(fmt.Sprintf("read image marker: %v", err))
+	}
+	sbin, err := os.Stat("/sbin")
+	if err != nil {
+		die(fmt.Sprintf("stat /sbin: %v", err))
+	}
+	if (os.Args[2] == "test-image" && string(marker) == "from-docker-image" && sbin.IsDir()) ||
+		(os.Args[2] == "other-image" && string(marker) == "other-image" && sbin.Mode().IsRegular()) {
+		fmt.Print("OK")
+		return
+	}
+	die(fmt.Sprintf("wrong image contents: ref=%s marker=%q sbin=%s", os.Args[2], marker, sbin.Mode()))
 }
 
 func cmdProbeReadlink() {
