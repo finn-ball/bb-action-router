@@ -74,12 +74,14 @@ func TestBuildUserInjectingVisitor_Passwd(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rec := newRecordingVisitor()
-			v := NewBuildUserInjectingVisitor(rec, UnixUser{UID: 1000, GID: 1000, Name: "build"})
-			require.NoError(t, v.OnFileSeen(context.Background(), "etc/passwd", strings.NewReader(tt.input), 0o644))
-			require.Equal(t, tt.want, rec.files["etc/passwd"])
-		})
+		for _, path := range []string{"etc/passwd", "./etc/passwd"} {
+			t.Run(tt.name+"/"+path, func(t *testing.T) {
+				rec := newRecordingVisitor()
+				v := NewBuildUserInjectingVisitor(rec, UnixUser{UID: 1000, GID: 1000, Name: "build"})
+				require.NoError(t, v.OnFileSeen(context.Background(), path, strings.NewReader(tt.input), 0o644))
+				require.Equal(t, tt.want, rec.files[path])
+			})
+		}
 	}
 }
 
@@ -117,12 +119,14 @@ func TestBuildUserInjectingVisitor_Group(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rec := newRecordingVisitor()
-			v := NewBuildUserInjectingVisitor(rec, UnixUser{UID: 1000, GID: 1000, Name: "build"})
-			require.NoError(t, v.OnFileSeen(context.Background(), "etc/group", strings.NewReader(tt.input), 0o644))
-			require.Equal(t, tt.want, rec.files["etc/group"])
-		})
+		for _, path := range []string{"etc/group", "./etc/group"} {
+			t.Run(tt.name+"/"+path, func(t *testing.T) {
+				rec := newRecordingVisitor()
+				v := NewBuildUserInjectingVisitor(rec, UnixUser{UID: 1000, GID: 1000, Name: "build"})
+				require.NoError(t, v.OnFileSeen(context.Background(), path, strings.NewReader(tt.input), 0o644))
+				require.Equal(t, tt.want, rec.files[path])
+			})
+		}
 	}
 }
 

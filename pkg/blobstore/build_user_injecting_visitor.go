@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	archivepath "path"
 	"strconv"
 	"strings"
 
@@ -45,7 +46,7 @@ func (v *BuildUserInjectingVisitor) OnDirectorySeen(ctx context.Context, path st
 
 // OnFileSeen forwards to the wrapped visitor, while modifying file contents as needed.
 func (v *BuildUserInjectingVisitor) OnFileSeen(ctx context.Context, path string, data io.Reader, mode int64) error {
-	switch path {
+	switch archivepath.Clean(path) {
 	case "etc/passwd":
 		content, err := setIDEntry(data, v.user.UID, v.user.Name, func(name, shell, ignored string) string {
 			return fmt.Sprintf("%s:x:%d:%d::/tmp:%s\n", name, v.user.UID, v.user.GID, shell)
