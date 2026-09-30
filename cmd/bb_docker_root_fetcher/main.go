@@ -157,6 +157,14 @@ func (m *materializer) newRootFetcher(blobAccess bb_blobstore.BlobAccess) *rootF
 func (m *materializer) materialize(ctx context.Context, imageRef string) (string, error) {
 	start := time.Now()
 
+	if err := docker.ValidateImageReferenceIsShaDigest(imageRef); err != nil {
+		return "", fmt.Errorf("invalid image ref %q: %w", imageRef, err)
+	}
+	ref, err := name.NewDigest(imageRef)
+	if err != nil {
+		return "", fmt.Errorf("invalid image ref %q: %w", imageRef, err)
+	}
+
 	ephemeralCasDir, err := os.MkdirTemp(m.rootsDir, ".tmp-blobs-")
 	if err != nil {
 		return "", fmt.Errorf("create ephemeral blob dir: %w", err)
@@ -181,18 +189,12 @@ func (m *materializer) materialize(ctx context.Context, imageRef string) (string
 	if err != nil {
 		return "", err
 	}
+	// After a successful rename this path no longer exists.
+	defer os.RemoveAll(inProgressRoot)
 
 	// Derive the name of the directory where we store the image from the ref.
-	if err := docker.ValidateImageReferenceIsShaDigest(imageRef); err != nil {
-		return "", fmt.Errorf("invalid image ref: %s", imageRef)
-	}
-	ref, err := name.NewDigest(imageRef)
-	if err != nil {
-		return "", fmt.Errorf("invalid image ref %q: %w", imageRef, err)
-	}
 	finalPath := filepath.Join(m.rootsDir, strings.TrimPrefix(ref.DigestStr(), "sha256:"))
 	if err := os.Rename(inProgressRoot, finalPath); err != nil {
-		os.RemoveAll(inProgressRoot)
 		return "", fmt.Errorf("rename to final path: %w", err)
 	}
 
