@@ -105,6 +105,7 @@ func TestCASUploadingLayerExtractor(t *testing.T) {
 
 		require.NoError(t, extractor.OnFileSeen(ctx, "dir/file1.txt", strings.NewReader("content1"), 0o644))
 		require.NoError(t, extractor.OnFileSeen(ctx, "dir/file2.txt", strings.NewReader("content22"), 0o644))
+		require.NoError(t, extractor.OnLayerComplete(ctx))
 
 		// Add a whiteout file that deletes file1.txt
 		require.NoError(t, extractor.OnFileSeen(ctx, "dir/.wh.file1.txt", strings.NewReader(""), 0o644))
@@ -140,6 +141,7 @@ func TestCASUploadingLayerExtractor(t *testing.T) {
 		// Add file1.txt and file2.txt
 		require.NoError(t, extractor.OnFileSeen(ctx, "dir/file1.txt", strings.NewReader("content1"), 0o644))
 		require.NoError(t, extractor.OnFileSeen(ctx, "dir/file2.txt", strings.NewReader("content22"), 0o644))
+		require.NoError(t, extractor.OnLayerComplete(ctx))
 
 		// Add opaque whiteout that clears the entire directory
 		require.NoError(t, extractor.OnFileSeen(ctx, "dir/.wh..wh..opq", strings.NewReader(""), 0o644))
@@ -158,6 +160,52 @@ func TestCASUploadingLayerExtractor(t *testing.T) {
 			"file:blob[9 bytes]",
 		}
 		require.Equal(t, expected, trackingCas.GetEntries())
+	})
+
+	t.Run("WhiteoutsPreserveCurrentLayer", func(t *testing.T) {
+		for _, marker := range []string{".wh.dir", "dir/.wh..wh..opq"} {
+			for _, markerFirst := range []bool{true, false} {
+				t.Run(fmt.Sprintf("%s/first=%t", marker, markerFirst), func(t *testing.T) {
+					ctx := context.Background()
+					mockCas := mock.NewMockBlobAccess(gomock.NewController(t))
+					df := digest.MustNewFunction("test", remoteexecution.DigestFunction_SHA256)
+					trackingCas := newFilesystemTrackingBlobAccess(mockCas, df)
+					mockCas.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+					extractor := NewCASUploadingLayerExtractor(trackingCas, df)
+
+					require.NoError(t, extractor.OnFileSeen(ctx, "dir/old", strings.NewReader("old"), 0o644))
+					require.NoError(t, extractor.OnFileSeen(ctx, "dir/nested/old", strings.NewReader("old"), 0o644))
+					require.NoError(t, extractor.OnLayerComplete(ctx))
+
+					whiteout := func() {
+						require.NoError(t, extractor.OnFileSeen(ctx, marker, strings.NewReader(""), 0o644))
+					}
+					if markerFirst {
+						whiteout()
+					}
+					require.NoError(t, extractor.OnFileSeen(ctx, "dir/new", strings.NewReader("new!"), 0o644))
+					require.NoError(t, extractor.OnFileSeen(ctx, "dir/nested/new", strings.NewReader("new!"), 0o644))
+					require.NoError(t, extractor.OnSymlinkSeen(ctx, "dir/link", "new"))
+					require.NoError(t, extractor.OnLinkSeen(ctx, "dir/hardlink", "dir/new"))
+					if !markerFirst {
+						whiteout()
+					}
+					require.NoError(t, extractor.OnLayerComplete(ctx))
+
+					_, err := extractor.UploadDirectories(ctx)
+					require.NoError(t, err)
+					require.Equal(t, []string{
+						"dir:(1 dirs: [dir])",
+						"dir:(1 files: [new])",
+						"dir:(2 files: [hardlink, new], 1 dirs: [nested], symlinks: [link->new])",
+						"file:blob[3 bytes]",
+						"file:blob[3 bytes]",
+						"file:blob[4 bytes]",
+						"file:blob[4 bytes]",
+					}, trackingCas.GetEntries())
+				})
+			}
+		}
 	})
 
 	t.Run("DuplicateSymlinks", func(t *testing.T) {

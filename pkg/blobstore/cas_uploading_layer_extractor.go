@@ -25,7 +25,8 @@ import (
 type CASUploadingLayerExtractor struct {
 	cas            bb_blobstore.BlobAccess
 	digestFunction bb_digest.Function
-	root           *uploadDirState
+	root           *uploadDirState // Completed layers, with current whiteouts applied.
+	layer          *uploadDirState // Current layer's additions, protected from whiteouts.
 }
 
 // NewCASUploadingLayerExtractor creates a new extractor that uploads Docker layer contents to CAS as it traverses them.
@@ -34,13 +35,14 @@ func NewCASUploadingLayerExtractor(cas bb_blobstore.BlobAccess, df bb_digest.Fun
 		cas:            cas,
 		digestFunction: df,
 		root:           newUploadDirState(),
+		layer:          newUploadDirState(),
 	}
 }
 
 // OnDirectorySeen is called when a directory is encountered in the Docker layer.
 func (e *CASUploadingLayerExtractor) OnDirectorySeen(ctx context.Context, path string) error {
 	// Create the directory dirNode
-	_ = e.root.getOrCreateChildDirState(path)
+	_ = e.layer.getOrCreateChildDirState(path)
 
 	return nil
 }
@@ -48,21 +50,24 @@ func (e *CASUploadingLayerExtractor) OnDirectorySeen(ctx context.Context, path s
 // OnFileSeen is called when a file is encountered in the Docker layer. It uploads the file to CAS and handles whiteout files.
 func (e *CASUploadingLayerExtractor) OnFileSeen(ctx context.Context, path string, data io.Reader, mode int64) error {
 	dirname, filename := filepath.Split(path)
-	dirNode := e.root.getOrCreateChildDirState(dirname)
+	dirNode := e.layer.getOrCreateChildDirState(dirname)
 
 	// Handle Docker whiteout files
 	// See https://github.com/opencontainers/image-spec/blob/main/layer.md#whiteouts
 	if strings.HasPrefix(filename, ".wh.") {
+		// Apply whiteouts only to completed layers. Entries in the current
+		// layer are merged afterwards, regardless of their archive order.
+		lowerDir := e.root.getChildDirState(dirname)
+		if lowerDir == nil {
+			return nil
+		}
 		if filename == ".wh..wh..opq" {
-			// Opaque whiteout - clear all files and directories in the current directory
-			dirNode.files = make(map[string]*remoteexecution.FileNode)
-			dirNode.subDirs = make(map[string]*uploadDirState)
-			dirNode.symlinks = make(map[string]*remoteexecution.SymlinkNode)
-			dirNode.hardLinks = make(map[string]string)
+			clear(lowerDir.files)
+			clear(lowerDir.subDirs)
+			clear(lowerDir.symlinks)
+			clear(lowerDir.hardLinks)
 		} else {
-			// Regular whiteout - delete the specific file/directory
-			targetName := strings.TrimPrefix(filename, ".wh.")
-			dirNode.delete(targetName)
+			lowerDir.delete(strings.TrimPrefix(filename, ".wh."))
 		}
 		return nil
 	}
@@ -117,7 +122,7 @@ func (e *CASUploadingLayerExtractor) OnFileSeen(ctx context.Context, path string
 // OnLinkSeen is called when a hard link is encountered in the Docker layer.
 func (e *CASUploadingLayerExtractor) OnLinkSeen(ctx context.Context, path, target string) error {
 	dirname, linkname := filepath.Split(path)
-	dirNode := e.root.getOrCreateChildDirState(dirname)
+	dirNode := e.layer.getOrCreateChildDirState(dirname)
 	dirNode.delete(linkname)
 	dirNode.hardLinks[linkname] = target
 	return nil
@@ -130,7 +135,7 @@ func (e *CASUploadingLayerExtractor) OnSymlinkSeen(ctx context.Context, path, ta
 
 func (e *CASUploadingLayerExtractor) addSymlink(path, target string) error {
 	dirname, linkname := filepath.Split(path)
-	dirNode := e.root.getOrCreateChildDirState(dirname)
+	dirNode := e.layer.getOrCreateChildDirState(dirname)
 	dirNode.delete(linkname)
 	dirNode.symlinks[linkname] = &remoteexecution.SymlinkNode{
 		Name:   linkname,
@@ -141,6 +146,9 @@ func (e *CASUploadingLayerExtractor) addSymlink(path, target string) error {
 
 // OnLayerComplete is called after all other OnSeen* calls corresponding to a single Docker layer.
 func (e *CASUploadingLayerExtractor) OnLayerComplete(ctx context.Context) error {
+	e.root.merge(e.layer)
+	e.layer = newUploadDirState()
+
 	// Resolve hard links separately for each layer (otherwise overwrites in later layers
 	// could incorrectly cause contents of the hard links to change).
 	return e.root.resolveHardlinks(e.root)
@@ -149,6 +157,9 @@ func (e *CASUploadingLayerExtractor) OnLayerComplete(ctx context.Context) error 
 // UploadDirectories uploads the accumulated filesystem state to the CAS
 // returning the digest of the root directory.
 func (e *CASUploadingLayerExtractor) UploadDirectories(ctx context.Context) (*remoteexecution.Digest, error) {
+	if err := e.OnLayerComplete(ctx); err != nil {
+		return nil, err
+	}
 	digest, err := e.root.upload(ctx, e.cas, e.digestFunction)
 	if err != nil {
 		return nil, err
@@ -231,6 +242,31 @@ func (u *uploadDirState) delete(filename string) {
 	delete(u.subDirs, filename)
 	delete(u.symlinks, filename)
 	delete(u.hardLinks, filename)
+}
+
+// merge applies a layer's additions after its whiteouts have removed lower
+// entries. Directories merge recursively; other entries replace their names.
+func (u *uploadDirState) merge(layer *uploadDirState) {
+	for name, child := range layer.subDirs {
+		if existing := u.subDirs[name]; existing != nil {
+			existing.merge(child)
+		} else {
+			u.delete(name)
+			u.subDirs[name] = child
+		}
+	}
+	for name, file := range layer.files {
+		u.delete(name)
+		u.files[name] = file
+	}
+	for name, symlink := range layer.symlinks {
+		u.delete(name)
+		u.symlinks[name] = symlink
+	}
+	for name, target := range layer.hardLinks {
+		u.delete(name)
+		u.hardLinks[name] = target
+	}
 }
 
 func (u *uploadDirState) resolveHardlinks(root *uploadDirState) error {
