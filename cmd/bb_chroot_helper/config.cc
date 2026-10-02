@@ -221,6 +221,21 @@ struct Flag {
 // flag/command boundary and the usage message are all derived from it.
 constexpr Flag kFlags[] = {
     {kConfig, "PATH", nullptr},
+    {"dependency-tree", "REFERENCE",
+     [](const std::string& v, Config* c, std::string*) {
+       c->dependency_tree = v;
+       return true;
+     }},
+    {"dependency-path", "PATH",
+     [](const std::string& v, Config* c, std::string*) {
+       c->dependency_path = v;
+       return true;
+     }},
+    {"dependency-root", "PATH",
+     [](const std::string& v, Config* c, std::string*) {
+       c->dependency_root = v;
+       return true;
+     }},
     {kDockerImageRef, "REF",
      [](const std::string& value, Config* config, std::string*) {
        config->docker_image_ref = value;
@@ -382,6 +397,26 @@ bool parse_command_line(int argc, char** argv, Config* config, int* command_star
 }
 
 bool validate_config(const Config& config, std::string* error) {
+  if (!config.dependency_tree.empty() || !config.dependency_path.empty() || !config.dependency_root.empty()) {
+    std::filesystem::path path(config.dependency_path);
+    bool valid = !path.empty() && !path.is_absolute() && path.lexically_normal().string() == config.dependency_path;
+    for (const auto& part : path) {
+      if (part == "." || part == "..") {
+        valid = false;
+      }
+    }
+    std::string ascent = config.dependency_root;
+    while (ascent.rfind("../", 0) == 0) {
+      ascent.erase(0, 3);
+    }
+    if (!valid || ascent != "." || config.root_mode != "tmpfs" || config.dependency_tree.rfind("cas-v1:", 0) != 0 ||
+        config.dependency_tree.size() > 8192 || config.dependency_tree.find_first_of(" \t\r\n") != std::string::npos) {
+      *error =
+          "dependency mount requires tmpfs, a cas-v1 reference, normalized relative path and ../ ascent ending in .";
+      return false;
+    }
+  }
+
   if (config.root_mode != "overlay" && config.root_mode != "tmpfs") {
     *error = std::string(kRootMode) + " must be overlay or tmpfs";
     return false;

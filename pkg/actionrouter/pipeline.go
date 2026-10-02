@@ -331,6 +331,9 @@ func NewPipeline(config *pb.ApplicationConfiguration, cas, actionCache bb_blobst
 		p.condition = condition
 	}
 	for i, opConfig := range pipelineConfig.GetOperations() {
+		if opConfig.GetCacheDependencySubtree() != nil && i != len(pipelineConfig.GetOperations())-1 {
+			return nil, status.Error(codes.InvalidArgument, "cache_dependency_subtree must be the last operation")
+		}
 		op, err := buildOperation(opConfig, cas, actionCache, p.maximumMessageSizeBytes)
 		if err != nil {
 			return nil, util.StatusWrapf(err, "Operation %d", i)
@@ -359,6 +362,8 @@ func buildOperation(config *pb.Operation, cas, actionCache bb_blobstore.BlobAcce
 		return newEditCommandOp(kind.EditCommand)
 	case *pb.Operation_EditEnvironment:
 		return newEditEnvironmentOp(kind.EditEnvironment)
+	case *pb.Operation_CacheDependencySubtree:
+		return newCacheDependencySubtreeOp(kind.CacheDependencySubtree)
 	case *pb.Operation_MergeDockerRoot:
 		return newMergeDockerRootOp(kind.MergeDockerRoot, cas, actionCache, maxMessageSize)
 	case nil:

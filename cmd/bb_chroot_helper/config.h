@@ -19,6 +19,11 @@ struct Config {
   // config file equivalent.
   std::string docker_image_ref;
 
+  // Experimental single dependency mount, supplied by the router only.
+  std::string dependency_tree;
+  std::string dependency_path;
+  std::string dependency_root;
+
   // Path of the bb_docker_root_fetcher socket. Unused in inline mode.
   std::string fetcher_socket = "/var/run/fetcher/fetcher.sock";
 
