@@ -3,6 +3,7 @@ syntax = "proto3";
 package buildbarn.configuration.docker_root_fetcher;
 
 import "google/protobuf/duration.proto";
+import "github.com/buildbarn/bb-storage/pkg/proto/configuration/blobstore/blobstore.proto";
 import "github.com/buildbarn/bb-action-router/pkg/proto/configuration/build_user/build_user.proto";
 import "github.com/buildbarn/bb-action-router/pkg/proto/configuration/registry_auth/registry_auth.proto";
 import "github.com/buildbarn/bb-storage/pkg/proto/configuration/global/global.proto";
@@ -87,4 +88,7 @@ message ApplicationConfiguration {
   // accumulate. Setting it equal to root_use_boost degenerates the eviction
   // policy into plain LRU. Defaults to 30m.
   google.protobuf.Duration maximum_root_use_boost = 23;
+
+  // Optional cluster CAS used by experimental cas-v1 dependency acquisitions.
+  buildbarn.configuration.blobstore.BlobstoreConfiguration dependency_blobstore = 24;
 }

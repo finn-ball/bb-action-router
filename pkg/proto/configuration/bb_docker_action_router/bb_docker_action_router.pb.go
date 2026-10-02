@@ -165,6 +165,7 @@ type Operation struct {
 	//	*Operation_EditCommand
 	//	*Operation_EditEnvironment
 	//	*Operation_MergeDockerRoot
+	//	*Operation_CacheDependencySubtree
 	Kind          isOperation_Kind `protobuf_oneof:"kind"`
 	Condition     string           `protobuf:"bytes,7,opt,name=condition,proto3" json:"condition,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -262,6 +263,15 @@ func (x *Operation) GetMergeDockerRoot() *MergeDockerRoot {
 	return nil
 }
 
+func (x *Operation) GetCacheDependencySubtree() *CacheDependencySubtree {
+	if x != nil {
+		if x, ok := x.Kind.(*Operation_CacheDependencySubtree); ok {
+			return x.CacheDependencySubtree
+		}
+	}
+	return nil
+}
+
 func (x *Operation) GetCondition() string {
 	if x != nil {
 		return x.Condition
@@ -297,6 +307,10 @@ type Operation_MergeDockerRoot struct {
 	MergeDockerRoot *MergeDockerRoot `protobuf:"bytes,6,opt,name=merge_docker_root,json=mergeDockerRoot,proto3,oneof"`
 }
 
+type Operation_CacheDependencySubtree struct {
+	CacheDependencySubtree *CacheDependencySubtree `protobuf:"bytes,8,opt,name=cache_dependency_subtree,json=cacheDependencySubtree,proto3,oneof"`
+}
+
 func (*Operation_AssertPlatformProperty) isOperation_Kind() {}
 
 func (*Operation_MapPlatformProperty) isOperation_Kind() {}
@@ -308,6 +322,8 @@ func (*Operation_EditCommand) isOperation_Kind() {}
 func (*Operation_EditEnvironment) isOperation_Kind() {}
 
 func (*Operation_MergeDockerRoot) isOperation_Kind() {}
+
+func (*Operation_CacheDependencySubtree) isOperation_Kind() {}
 
 type AssertPlatformProperty struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -697,6 +713,58 @@ func (x *MergeDockerRoot) GetRegistryAuthentication() []*registry_auth.RegistryA
 	return nil
 }
 
+type CacheDependencySubtree struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Path            string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	HelperArguments []string               `protobuf:"bytes,2,rep,name=helper_arguments,json=helperArguments,proto3" json:"helper_arguments,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CacheDependencySubtree) Reset() {
+	*x = CacheDependencySubtree{}
+	mi := &file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CacheDependencySubtree) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CacheDependencySubtree) ProtoMessage() {}
+
+func (x *CacheDependencySubtree) ProtoReflect() protoreflect.Message {
+	mi := &file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CacheDependencySubtree.ProtoReflect.Descriptor instead.
+func (*CacheDependencySubtree) Descriptor() ([]byte, []int) {
+	return file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CacheDependencySubtree) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *CacheDependencySubtree) GetHelperArguments() []string {
+	if x != nil {
+		return x.HelperArguments
+	}
+	return nil
+}
+
 var File_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto protoreflect.FileDescriptor
 
 const file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_rawDesc = "" +
@@ -712,14 +780,15 @@ const file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_dock
 	"\tcondition\x18\x01 \x01(\tR\tcondition\x12Z\n" +
 	"\n" +
 	"operations\x18\x02 \x03(\v2:.buildbarn.configuration.bb_docker_action_router.OperationR\n" +
-	"operations\"\xf4\x05\n" +
+	"operations\"\xfa\x06\n" +
 	"\tOperation\x12\x83\x01\n" +
 	"\x18assert_platform_property\x18\x01 \x01(\v2G.buildbarn.configuration.bb_docker_action_router.AssertPlatformPropertyH\x00R\x16assertPlatformProperty\x12z\n" +
 	"\x15map_platform_property\x18\x02 \x01(\v2D.buildbarn.configuration.bb_docker_action_router.MapPlatformPropertyH\x00R\x13mapPlatformProperty\x12}\n" +
 	"\x16edit_platform_property\x18\x03 \x01(\v2E.buildbarn.configuration.bb_docker_action_router.EditPlatformPropertyH\x00R\x14editPlatformProperty\x12a\n" +
 	"\fedit_command\x18\x04 \x01(\v2<.buildbarn.configuration.bb_docker_action_router.EditCommandH\x00R\veditCommand\x12m\n" +
 	"\x10edit_environment\x18\x05 \x01(\v2@.buildbarn.configuration.bb_docker_action_router.EditEnvironmentH\x00R\x0feditEnvironment\x12n\n" +
-	"\x11merge_docker_root\x18\x06 \x01(\v2@.buildbarn.configuration.bb_docker_action_router.MergeDockerRootH\x00R\x0fmergeDockerRoot\x12\x1c\n" +
+	"\x11merge_docker_root\x18\x06 \x01(\v2@.buildbarn.configuration.bb_docker_action_router.MergeDockerRootH\x00R\x0fmergeDockerRoot\x12\x83\x01\n" +
+	"\x18cache_dependency_subtree\x18\b \x01(\v2G.buildbarn.configuration.bb_docker_action_router.CacheDependencySubtreeH\x00R\x16cacheDependencySubtree\x12\x1c\n" +
 	"\tcondition\x18\a \x01(\tR\tconditionB\x06\n" +
 	"\x04kind\"J\n" +
 	"\x16AssertPlatformProperty\x12\x1a\n" +
@@ -752,7 +821,10 @@ const file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_dock
 	"build_user\x18\x03 \x01(\v2-.buildbarn.configuration.build_user.BuildUserR\tbuildUser\x127\n" +
 	"\x18maximum_image_size_bytes\x18\x04 \x01(\x03R\x15maximumImageSizeBytes\x12G\n" +
 	"\x12image_pull_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x10imagePullTimeout\x12\x83\x01\n" +
-	"\x17registry_authentication\x18\x06 \x03(\v2J.buildbarn.configuration.registry_auth.RegistryAuthenticationConfigurationR\x16registryAuthenticationBWZUgithub.com/buildbarn/bb-action-router/pkg/proto/configuration/bb_docker_action_routerb\x06proto3"
+	"\x17registry_authentication\x18\x06 \x03(\v2J.buildbarn.configuration.registry_auth.RegistryAuthenticationConfigurationR\x16registryAuthentication\"W\n" +
+	"\x16CacheDependencySubtree\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12)\n" +
+	"\x10helper_arguments\x18\x02 \x03(\tR\x0fhelperArgumentsBWZUgithub.com/buildbarn/bb-action-router/pkg/proto/configuration/bb_docker_action_routerb\x06proto3"
 
 var (
 	file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_rawDescOnce sync.Once
@@ -766,7 +838,7 @@ func file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docke
 	return file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_rawDescData
 }
 
-var file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_goTypes = []any{
 	(*ApplicationConfiguration)(nil),         // 0: buildbarn.configuration.bb_docker_action_router.ApplicationConfiguration
 	(*ActionPipeline)(nil),                   // 1: buildbarn.configuration.bb_docker_action_router.ActionPipeline
@@ -778,19 +850,20 @@ var file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker
 	(*EditCommand)(nil),                      // 7: buildbarn.configuration.bb_docker_action_router.EditCommand
 	(*EditEnvironment)(nil),                  // 8: buildbarn.configuration.bb_docker_action_router.EditEnvironment
 	(*MergeDockerRoot)(nil),                  // 9: buildbarn.configuration.bb_docker_action_router.MergeDockerRoot
-	nil,                                      // 10: buildbarn.configuration.bb_docker_action_router.MapPlatformProperty.ReplacementsEntry
-	nil,                                      // 11: buildbarn.configuration.bb_docker_action_router.EditEnvironment.SetEntry
-	(*grpc.ServerConfiguration)(nil),         // 12: buildbarn.configuration.grpc.ServerConfiguration
-	(*global.Configuration)(nil),             // 13: buildbarn.configuration.global.Configuration
-	(*blobstore.BlobstoreConfiguration)(nil), // 14: buildbarn.configuration.blobstore.BlobstoreConfiguration
-	(*build_user.BuildUser)(nil),             // 15: buildbarn.configuration.build_user.BuildUser
-	(*durationpb.Duration)(nil),              // 16: google.protobuf.Duration
-	(*registry_auth.RegistryAuthenticationConfiguration)(nil), // 17: buildbarn.configuration.registry_auth.RegistryAuthenticationConfiguration
+	(*CacheDependencySubtree)(nil),           // 10: buildbarn.configuration.bb_docker_action_router.CacheDependencySubtree
+	nil,                                      // 11: buildbarn.configuration.bb_docker_action_router.MapPlatformProperty.ReplacementsEntry
+	nil,                                      // 12: buildbarn.configuration.bb_docker_action_router.EditEnvironment.SetEntry
+	(*grpc.ServerConfiguration)(nil),         // 13: buildbarn.configuration.grpc.ServerConfiguration
+	(*global.Configuration)(nil),             // 14: buildbarn.configuration.global.Configuration
+	(*blobstore.BlobstoreConfiguration)(nil), // 15: buildbarn.configuration.blobstore.BlobstoreConfiguration
+	(*build_user.BuildUser)(nil),             // 16: buildbarn.configuration.build_user.BuildUser
+	(*durationpb.Duration)(nil),              // 17: google.protobuf.Duration
+	(*registry_auth.RegistryAuthenticationConfiguration)(nil), // 18: buildbarn.configuration.registry_auth.RegistryAuthenticationConfiguration
 }
 var file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_depIdxs = []int32{
-	12, // 0: buildbarn.configuration.bb_docker_action_router.ApplicationConfiguration.grpc_servers:type_name -> buildbarn.configuration.grpc.ServerConfiguration
-	13, // 1: buildbarn.configuration.bb_docker_action_router.ApplicationConfiguration.global:type_name -> buildbarn.configuration.global.Configuration
-	14, // 2: buildbarn.configuration.bb_docker_action_router.ApplicationConfiguration.blobstore:type_name -> buildbarn.configuration.blobstore.BlobstoreConfiguration
+	13, // 0: buildbarn.configuration.bb_docker_action_router.ApplicationConfiguration.grpc_servers:type_name -> buildbarn.configuration.grpc.ServerConfiguration
+	14, // 1: buildbarn.configuration.bb_docker_action_router.ApplicationConfiguration.global:type_name -> buildbarn.configuration.global.Configuration
+	15, // 2: buildbarn.configuration.bb_docker_action_router.ApplicationConfiguration.blobstore:type_name -> buildbarn.configuration.blobstore.BlobstoreConfiguration
 	1,  // 3: buildbarn.configuration.bb_docker_action_router.ApplicationConfiguration.pipeline:type_name -> buildbarn.configuration.bb_docker_action_router.ActionPipeline
 	2,  // 4: buildbarn.configuration.bb_docker_action_router.ActionPipeline.operations:type_name -> buildbarn.configuration.bb_docker_action_router.Operation
 	3,  // 5: buildbarn.configuration.bb_docker_action_router.Operation.assert_platform_property:type_name -> buildbarn.configuration.bb_docker_action_router.AssertPlatformProperty
@@ -799,17 +872,18 @@ var file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker
 	7,  // 8: buildbarn.configuration.bb_docker_action_router.Operation.edit_command:type_name -> buildbarn.configuration.bb_docker_action_router.EditCommand
 	8,  // 9: buildbarn.configuration.bb_docker_action_router.Operation.edit_environment:type_name -> buildbarn.configuration.bb_docker_action_router.EditEnvironment
 	9,  // 10: buildbarn.configuration.bb_docker_action_router.Operation.merge_docker_root:type_name -> buildbarn.configuration.bb_docker_action_router.MergeDockerRoot
-	10, // 11: buildbarn.configuration.bb_docker_action_router.MapPlatformProperty.replacements:type_name -> buildbarn.configuration.bb_docker_action_router.MapPlatformProperty.ReplacementsEntry
-	6,  // 12: buildbarn.configuration.bb_docker_action_router.EditPlatformProperty.add:type_name -> buildbarn.configuration.bb_docker_action_router.PlatformPropertyEntry
-	11, // 13: buildbarn.configuration.bb_docker_action_router.EditEnvironment.set:type_name -> buildbarn.configuration.bb_docker_action_router.EditEnvironment.SetEntry
-	15, // 14: buildbarn.configuration.bb_docker_action_router.MergeDockerRoot.build_user:type_name -> buildbarn.configuration.build_user.BuildUser
-	16, // 15: buildbarn.configuration.bb_docker_action_router.MergeDockerRoot.image_pull_timeout:type_name -> google.protobuf.Duration
-	17, // 16: buildbarn.configuration.bb_docker_action_router.MergeDockerRoot.registry_authentication:type_name -> buildbarn.configuration.registry_auth.RegistryAuthenticationConfiguration
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	10, // 11: buildbarn.configuration.bb_docker_action_router.Operation.cache_dependency_subtree:type_name -> buildbarn.configuration.bb_docker_action_router.CacheDependencySubtree
+	11, // 12: buildbarn.configuration.bb_docker_action_router.MapPlatformProperty.replacements:type_name -> buildbarn.configuration.bb_docker_action_router.MapPlatformProperty.ReplacementsEntry
+	6,  // 13: buildbarn.configuration.bb_docker_action_router.EditPlatformProperty.add:type_name -> buildbarn.configuration.bb_docker_action_router.PlatformPropertyEntry
+	12, // 14: buildbarn.configuration.bb_docker_action_router.EditEnvironment.set:type_name -> buildbarn.configuration.bb_docker_action_router.EditEnvironment.SetEntry
+	16, // 15: buildbarn.configuration.bb_docker_action_router.MergeDockerRoot.build_user:type_name -> buildbarn.configuration.build_user.BuildUser
+	17, // 16: buildbarn.configuration.bb_docker_action_router.MergeDockerRoot.image_pull_timeout:type_name -> google.protobuf.Duration
+	18, // 17: buildbarn.configuration.bb_docker_action_router.MergeDockerRoot.registry_authentication:type_name -> buildbarn.configuration.registry_auth.RegistryAuthenticationConfiguration
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() {
@@ -826,6 +900,7 @@ func file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docke
 		(*Operation_EditCommand)(nil),
 		(*Operation_EditEnvironment)(nil),
 		(*Operation_MergeDockerRoot)(nil),
+		(*Operation_CacheDependencySubtree)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -833,7 +908,7 @@ func file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docke
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_rawDesc), len(file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_bb_docker_action_router_bb_docker_action_router_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net"
@@ -19,11 +20,13 @@ import (
 	"github.com/buildbarn/bb-action-router/pkg/fetcher"
 	"github.com/buildbarn/bb-action-router/pkg/logging"
 	"github.com/buildbarn/bb-action-router/pkg/proto/configuration/docker_root_fetcher"
+	"github.com/buildbarn/bb-action-router/pkg/subtree"
 
 	remoteexecution "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	"github.com/buildbarn/bb-remote-execution/pkg/builder"
 	"github.com/buildbarn/bb-remote-execution/pkg/cas"
 	bb_blobstore "github.com/buildbarn/bb-storage/pkg/blobstore"
+	blobstore_configuration "github.com/buildbarn/bb-storage/pkg/blobstore/configuration"
 	bb_cas "github.com/buildbarn/bb-storage/pkg/cas"
 	bb_digest "github.com/buildbarn/bb-storage/pkg/digest"
 	"github.com/buildbarn/bb-storage/pkg/filesystem"
@@ -31,6 +34,7 @@ import (
 	"github.com/buildbarn/bb-storage/pkg/global"
 	"github.com/buildbarn/bb-storage/pkg/program"
 	"github.com/buildbarn/bb-storage/pkg/util"
+	"github.com/buildbarn/bb-storage/pkg/zstd"
 	"github.com/google/go-containerregistry/pkg/name"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -110,7 +114,8 @@ func (h *connectionHandler) handleConnection(ctx context.Context, conn net.Conn)
 // ephemeral CAS is removed once materialization completes (success or
 // failure), leaving only the materialized root on disk.
 type materializer struct {
-	rootsDir string
+	rootsDir      string
+	dependencyCAS bb_blobstore.BlobAccess
 	// openDirLimit is retained for configuration compatibility, but is
 	// currently unused: the naive build directory used to materialize
 	// trees does not expose an open-directory limit.
@@ -124,6 +129,9 @@ type materializer struct {
 }
 
 func (m *materializer) Materialize(ctx context.Context, imageRef string) (string, error) {
+	if strings.HasPrefix(imageRef, subtree.Prefix) {
+		return m.materializeDependency(ctx, imageRef)
+	}
 	st := "success"
 	path, err := m.materialize(ctx, imageRef)
 	if err != nil {
@@ -189,6 +197,17 @@ func (m *materializer) materialize(ctx context.Context, imageRef string) (string
 		return "", err
 	}
 
+	defer os.RemoveAll(inProgressRoot)
+
+	// Guarantee /bin and /var exist — the chroot helper requires them as
+	// mount points on the runner container. Images that don't ship one or
+	// both get an empty directory here.
+	for _, sub := range []string{"bin", "var"} {
+		p := filepath.Join(inProgressRoot, sub)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			return "", fmt.Errorf("ensure %s exists: %w", p, err)
+		}
+	}
 	// Derive the name of the directory where we store the image from the ref.
 	if err := docker.ValidateImageReferenceIsShaDigest(imageRef); err != nil {
 		return "", fmt.Errorf("invalid image ref: %s", imageRef)
@@ -227,8 +246,7 @@ func (m *materializer) buildRoot(ctx context.Context, fetchCoordinator *rootFetc
 	return inProgressRoot, nil
 }
 
-// populateRoot fetches the tree at `rootDigest` into `dirPath` and ensures
-// the mountpoint directories required by the chroot helper exist.
+// populateRoot fetches only the tree at `rootDigest` into `dirPath`.
 func (materializer) populateRoot(ctx context.Context, dirPath string, fetchCoordinator *rootFetcher, rootDigest bb_digest.Digest) error {
 	dir, err := filesystem.NewLocalDirectory(path.LocalFormat.NewParser(dirPath))
 	if err != nil {
@@ -252,15 +270,6 @@ func (materializer) populateRoot(ctx context.Context, dirPath string, fetchCoord
 		return fmt.Errorf("materialize: %w", err)
 	}
 
-	// Guarantee /bin and /var exist — the chroot helper requires them as
-	// mount points on the runner container. Images that don't ship one or
-	// both get an empty directory here.
-	for _, sub := range []string{"bin", "var"} {
-		p := filepath.Join(dirPath, sub)
-		if err := os.MkdirAll(p, 0o755); err != nil {
-			return fmt.Errorf("ensure %s exists: %w", p, err)
-		}
-	}
 	return nil
 }
 
@@ -277,7 +286,7 @@ func main() {
 			return util.StatusWrapf(err, "Failed to read configuration from %s", os.Args[1])
 		}
 
-		lifecycleState, _, err := global.ApplyConfiguration(config.Global, dependenciesGroup)
+		lifecycleState, grpcClientFactory, err := global.ApplyConfiguration(config.Global, dependenciesGroup)
 		if err != nil {
 			return util.StatusWrap(err, "Failed to apply global configuration options")
 		}
@@ -296,15 +305,9 @@ func main() {
 			return status.Errorf(codes.InvalidArgument, "RootsDirectoryPath %q must contain at least one path segment", config.RootsDirectoryPath)
 		}
 
-		// Wipe leftover state from previous runs. After a fetcher restart
-		// there are no live runners holding any of these directories, so
-		// anything we find is either an orphaned root from before the
-		// restart or a crashed-mid-materialize tempdir.
-		if err := os.RemoveAll(config.RootsDirectoryPath); err != nil {
-			return util.StatusWrapf(err, "Failed to clear roots directory %v", config.RootsDirectoryPath)
-		}
-		if err := os.MkdirAll(config.RootsDirectoryPath, 0o755); err != nil {
-			return util.StatusWrapf(err, "Failed to create roots directory %v", config.RootsDirectoryPath)
+		rootsDir, err := prepareRootsDirectory(config.RootsDirectoryPath, config.DependencyBlobstore != nil)
+		if err != nil {
+			return util.StatusWrap(err, "Failed to prepare roots directory")
 		}
 
 		authConfig, err := fetcher.ParseRegistryAuth(config.RegistryAuthentication)
@@ -355,7 +358,7 @@ func main() {
 		}
 
 		m := &materializer{
-			rootsDir:         config.RootsDirectoryPath,
+			rootsDir:         rootsDir,
 			openDirLimit:     openDirLimit,
 			fetchParallelism: fetchParallelism,
 			maxMessageSize:   int(config.MaximumMessageSizeBytes),
@@ -363,6 +366,15 @@ func main() {
 			puller:           puller,
 			buildUser:        buildUser,
 			metrics:          metrics,
+		}
+
+		if config.DependencyBlobstore != nil {
+			m.dependencyCAS, _, err = blobstore_configuration.NewCASAndACBlobAccessFromConfiguration(
+				dependenciesGroup, config.DependencyBlobstore, grpcClientFactory,
+				int(config.MaximumMessageSizeBytes), zstd.NewPoolFromConfiguration(nil))
+			if err != nil {
+				return util.StatusWrap(err, "Failed to create dependency CAS")
+			}
 		}
 
 		server, err := fetcher.NewServer(m, metrics, fetcher.ServerOptions{
@@ -418,4 +430,86 @@ func main() {
 			}()
 		}
 	})
+}
+
+// Dependency materialisation must not inject image files or mount points.
+func (m *materializer) materializeDependency(ctx context.Context, ref string) (string, error) {
+	if m.dependencyCAS == nil {
+		return "", fmt.Errorf("dependency_blobstore is not configured")
+	}
+	d, err := subtree.ParseReference(ref)
+	if err != nil {
+		return "", err
+	}
+	started := time.Now()
+	tmp, err := m.buildRoot(ctx, m.newRootFetcher(m.dependencyCAS), d)
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+	// Validate once on a cold miss, not in the router on every action.
+	if err := validateDependencySymlinks(tmp); err != nil {
+		return "", err
+	}
+	final := filepath.Join(m.rootsDir, fmt.Sprintf("cas-v1-%x", sha256.Sum256([]byte(ref))))
+	if err := os.Rename(tmp, final); err != nil {
+		return "", err
+	}
+	slog.Info("Materialized dependency subtree", "reference", ref, "duration", time.Since(started))
+	return final, nil
+}
+
+func validateDependencySymlinks(root string) error {
+	return filepath.WalkDir(root, func(p string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink == 0 {
+			return nil
+		}
+		target, err := os.Readlink(p)
+		if err != nil {
+			return err
+		}
+		// Reject absolute and lexical escapes even if they happen to point
+		// into this cache on this worker. They change meaning at mount time.
+		relative, err := filepath.Rel(root, filepath.Join(filepath.Dir(p), target))
+		if err != nil || filepath.IsAbs(target) || relative == ".." || strings.HasPrefix(relative, "../") {
+			return fmt.Errorf("dependency symlink escapes subtree: %s", p)
+		}
+		resolved, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			return fmt.Errorf("unresolved dependency symlink %s: %w", p, err)
+		}
+		relative, err = filepath.Rel(root, resolved)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, "../") {
+			return fmt.Errorf("dependency symlink escapes subtree: %s", p)
+		}
+		return nil
+	})
+}
+
+// In dependency mode, a new generation avoids deleting trees still mounted by
+// actions whose lease sockets were lost in a fetcher crash. Old generations
+// require manual cleanup after draining the worker; restart reuse is deferred.
+func prepareRootsDirectory(root string, dependencyMode bool) (string, error) {
+	if !dependencyMode {
+		if err := os.RemoveAll(root); err != nil {
+			return "", err
+		}
+	}
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return "", err
+	}
+	if !dependencyMode {
+		return root, nil
+	}
+	generation, err := os.MkdirTemp(root, "generation-")
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(generation, 0755); err != nil {
+		return "", err
+	}
+	return generation, nil
 }

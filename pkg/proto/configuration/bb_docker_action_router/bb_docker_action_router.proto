@@ -68,6 +68,7 @@ message Operation {
     EditCommand edit_command = 4;
     EditEnvironment edit_environment = 5;
     MergeDockerRoot merge_docker_root = 6;
+    CacheDependencySubtree cache_dependency_subtree = 8;
   }
 
   // Template gating this operation, with the same truthiness rules as
@@ -159,4 +160,14 @@ message MergeDockerRoot {
   repeated
       buildbarn.configuration.registry_auth.RegistryAuthenticationConfiguration
           registry_authentication = 6;
+}
+
+// Experimental: replace one input subtree with an empty mount point and wrap
+// the command in bb_chroot_helper. Must be the last pipeline operation.
+message CacheDependencySubtree {
+  // Normalized path relative to the current input root. Must exist.
+  string path = 1;
+  // Helper executable and flags, as Go templates. Do not include the "--"
+  // separator: the operation appends dependency flags and the separator.
+  repeated string helper_arguments = 2;
 }

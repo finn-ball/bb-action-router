@@ -339,7 +339,7 @@ static void install_signal_forwarders() {
 
 // Fork, run action in child, wait in parent, exit with matching status while
 // forwarding signals to child.
-[[noreturn]] static void run_and_fwd_signals(char** argv) {
+[[noreturn]] static void run_and_fwd_signals(char** argv, bool supervise_namespace = false) {
   // Block the forwarded signals around fork() so that signals don't get lost
   // before we've installed a handler.
   sigset_t block_set, old_set;
@@ -349,18 +349,43 @@ static void install_signal_forwarders() {
   }
   sigprocmask(SIG_BLOCK, &block_set, &old_set);
 
+  int parent_liveness[2] = {-1, -1};
+  if (supervise_namespace && pipe2(parent_liveness, O_CLOEXEC) != 0) {
+    die_errno("parent liveness pipe");
+  }
   pid_t pid = fork();
   if (pid < 0) {
     die_errno("fork");
   }
 
   if (pid == 0) {
+    if (supervise_namespace) {
+      // PID 1 holds the inherited leases until the command finishes. Exiting
+      // the PID namespace also terminates any remaining action descendants.
+      if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) {
+        die_errno("PR_SET_PDEATHSIG");
+      }
+      // getppid() is 0 for an out-of-namespace parent, even after it dies.
+      // A pipe detects death in the window between fork and PR_SET_PDEATHSIG.
+      close(parent_liveness[1]);
+      struct pollfd alive = {parent_liveness[0], POLLIN, 0};
+      if (poll(&alive, 1, 0) != 0) {
+        die("dependency supervisor parent exited");
+      }
+      close(parent_liveness[0]);
+      sigprocmask(SIG_SETMASK, &old_set, nullptr);
+      run_and_fwd_signals(argv);
+    }
     // Child: restore the signal mask and exec the action.
     sigprocmask(SIG_SETMASK, &old_set, nullptr);
     execvp(argv[0], argv);
     die_errno(std::string("exec ") + argv[0]);
   }
 
+  if (supervise_namespace) {
+    close(parent_liveness[0]);
+    // Keep the write end open until this supervisor exits.
+  }
   g_child_pid = pid;
   install_signal_forwarders();
   // Any signals delivered while blocked are queued and handled once we unblock.
@@ -418,6 +443,25 @@ int main(int argc, char** argv) {
     docker_root = acquire_docker_root(config.fetcher_socket, config.docker_image_ref);
   }
 
+  std::string dependency_source;
+  std::string dependency_destination;
+  if (!config.dependency_tree.empty()) {
+    dependency_source = acquire_docker_root(config.fetcher_socket, config.dependency_tree);
+    auto input_root = (fs::current_path() / config.dependency_root).lexically_normal();
+    dependency_destination = (input_root / config.dependency_path).string();
+    // Never follow an input symlink to pick a mount destination.
+    fs::path walked = input_root;
+    for (const auto& part : fs::path(config.dependency_path)) {
+      walked /= part;
+      if (fs::symlink_status(walked).type() != fs::file_type::directory) {
+        die("dependency destination must contain only directories: " + walked.string());
+      }
+    }
+    if (!fs::is_empty(dependency_destination)) {
+      die("dependency mount point is not empty");
+    }
+  }
+
   assert_build_user_exists(docker_root, config.build_uid, config.build_gid);
 
   if (mkdir(config.staging_root.c_str(), 0755) != 0 && errno != EEXIST) {
@@ -464,6 +508,9 @@ int main(int argc, char** argv) {
   // Create mount namespace
   // (we need to clone_newuser, otherwise the syscall fails)
   int unshare_flags = CLONE_NEWUSER | CLONE_NEWNS;
+  if (!dependency_source.empty()) {
+    unshare_flags |= CLONE_NEWPID;
+  }
   if (config.isolate_network) {
     unshare_flags |= CLONE_NEWNET;
   }
@@ -510,6 +557,16 @@ int main(int argc, char** argv) {
   mount_keep_dirs(config, root);
   bind_mount_etc_files(config, docker_root);
   mount_image_root(config, docker_root, root);
+  if (!dependency_source.empty()) {
+    std::string destination = root + dependency_destination;
+    // The input root must be visible through keep-dirs. Check again against
+    // the assembled sandbox rather than accidentally mounting into the image.
+    if (fs::canonical(destination) != fs::path(destination) || !fs::is_directory(destination) ||
+        !fs::is_empty(destination)) {
+      die("dependency destination is not an empty sandbox directory: " + destination);
+    }
+    bind_mount_ro(dependency_source, destination, 0);
+  }
   if (mark_mount_readonly(root.c_str()) != 0) {
     die_errno("mark readonly " + root);
   }
@@ -525,5 +582,5 @@ int main(int argc, char** argv) {
     die_errno(std::string("chdir ") + cwd);
   }
 
-  run_and_fwd_signals(&argv[cmd_start]);
+  run_and_fwd_signals(&argv[cmd_start], !dependency_source.empty());
 }

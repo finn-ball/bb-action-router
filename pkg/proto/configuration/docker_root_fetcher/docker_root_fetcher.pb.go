@@ -9,6 +9,7 @@ package docker_root_fetcher
 import (
 	build_user "github.com/buildbarn/bb-action-router/pkg/proto/configuration/build_user"
 	registry_auth "github.com/buildbarn/bb-action-router/pkg/proto/configuration/registry_auth"
+	blobstore "github.com/buildbarn/bb-storage/pkg/proto/configuration/blobstore"
 	global "github.com/buildbarn/bb-storage/pkg/proto/configuration/global"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -44,6 +45,7 @@ type ApplicationConfiguration struct {
 	BuildUser                *build_user.BuildUser                                `protobuf:"bytes,21,opt,name=build_user,json=buildUser,proto3" json:"build_user,omitempty"`
 	RootUseBoost             *durationpb.Duration                                 `protobuf:"bytes,22,opt,name=root_use_boost,json=rootUseBoost,proto3" json:"root_use_boost,omitempty"`
 	MaximumRootUseBoost      *durationpb.Duration                                 `protobuf:"bytes,23,opt,name=maximum_root_use_boost,json=maximumRootUseBoost,proto3" json:"maximum_root_use_boost,omitempty"`
+	DependencyBlobstore      *blobstore.BlobstoreConfiguration                    `protobuf:"bytes,24,opt,name=dependency_blobstore,json=dependencyBlobstore,proto3" json:"dependency_blobstore,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -197,11 +199,18 @@ func (x *ApplicationConfiguration) GetMaximumRootUseBoost() *durationpb.Duration
 	return nil
 }
 
+func (x *ApplicationConfiguration) GetDependencyBlobstore() *blobstore.BlobstoreConfiguration {
+	if x != nil {
+		return x.DependencyBlobstore
+	}
+	return nil
+}
+
 var File_github_com_buildbarn_bb_action_router_pkg_proto_configuration_docker_root_fetcher_docker_root_fetcher_proto protoreflect.FileDescriptor
 
 const file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_docker_root_fetcher_docker_root_fetcher_proto_rawDesc = "" +
 	"\n" +
-	"kgithub.com/buildbarn/bb-action-router/pkg/proto/configuration/docker_root_fetcher/docker_root_fetcher.proto\x12+buildbarn.configuration.docker_root_fetcher\x1a\x1egoogle/protobuf/duration.proto\x1aYgithub.com/buildbarn/bb-action-router/pkg/proto/configuration/build_user/build_user.proto\x1a_github.com/buildbarn/bb-action-router/pkg/proto/configuration/registry_auth/registry_auth.proto\x1aKgithub.com/buildbarn/bb-storage/pkg/proto/configuration/global/global.proto\"\xe5\b\n" +
+	"kgithub.com/buildbarn/bb-action-router/pkg/proto/configuration/docker_root_fetcher/docker_root_fetcher.proto\x12+buildbarn.configuration.docker_root_fetcher\x1a\x1egoogle/protobuf/duration.proto\x1aQgithub.com/buildbarn/bb-storage/pkg/proto/configuration/blobstore/blobstore.proto\x1aYgithub.com/buildbarn/bb-action-router/pkg/proto/configuration/build_user/build_user.proto\x1a_github.com/buildbarn/bb-action-router/pkg/proto/configuration/registry_auth/registry_auth.proto\x1aKgithub.com/buildbarn/bb-storage/pkg/proto/configuration/global/global.proto\"\xd3\t\n" +
 	"\x18ApplicationConfiguration\x12E\n" +
 	"\x06global\x18\x01 \x01(\v2-.buildbarn.configuration.global.ConfigurationR\x06global\x12\x1f\n" +
 	"\vsocket_path\x18\x02 \x01(\tR\n" +
@@ -222,7 +231,8 @@ const file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_docker_
 	"\n" +
 	"build_user\x18\x15 \x01(\v2-.buildbarn.configuration.build_user.BuildUserR\tbuildUser\x12?\n" +
 	"\x0eroot_use_boost\x18\x16 \x01(\v2\x19.google.protobuf.DurationR\frootUseBoost\x12N\n" +
-	"\x16maximum_root_use_boost\x18\x17 \x01(\v2\x19.google.protobuf.DurationR\x13maximumRootUseBoostBSZQgithub.com/buildbarn/bb-action-router/pkg/proto/configuration/docker_root_fetcherb\x06proto3"
+	"\x16maximum_root_use_boost\x18\x17 \x01(\v2\x19.google.protobuf.DurationR\x13maximumRootUseBoost\x12l\n" +
+	"\x14dependency_blobstore\x18\x18 \x01(\v29.buildbarn.configuration.blobstore.BlobstoreConfigurationR\x13dependencyBlobstoreBSZQgithub.com/buildbarn/bb-action-router/pkg/proto/configuration/docker_root_fetcherb\x06proto3"
 
 var (
 	file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_docker_root_fetcher_docker_root_fetcher_proto_rawDescOnce sync.Once
@@ -243,6 +253,7 @@ var file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_docker_ro
 	(*registry_auth.RegistryAuthenticationConfiguration)(nil), // 2: buildbarn.configuration.registry_auth.RegistryAuthenticationConfiguration
 	(*durationpb.Duration)(nil),                               // 3: google.protobuf.Duration
 	(*build_user.BuildUser)(nil),                              // 4: buildbarn.configuration.build_user.BuildUser
+	(*blobstore.BlobstoreConfiguration)(nil),                  // 5: buildbarn.configuration.blobstore.BlobstoreConfiguration
 }
 var file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_docker_root_fetcher_docker_root_fetcher_proto_depIdxs = []int32{
 	1, // 0: buildbarn.configuration.docker_root_fetcher.ApplicationConfiguration.global:type_name -> buildbarn.configuration.global.Configuration
@@ -252,11 +263,12 @@ var file_github_com_buildbarn_bb_action_router_pkg_proto_configuration_docker_ro
 	4, // 4: buildbarn.configuration.docker_root_fetcher.ApplicationConfiguration.build_user:type_name -> buildbarn.configuration.build_user.BuildUser
 	3, // 5: buildbarn.configuration.docker_root_fetcher.ApplicationConfiguration.root_use_boost:type_name -> google.protobuf.Duration
 	3, // 6: buildbarn.configuration.docker_root_fetcher.ApplicationConfiguration.maximum_root_use_boost:type_name -> google.protobuf.Duration
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	5, // 7: buildbarn.configuration.docker_root_fetcher.ApplicationConfiguration.dependency_blobstore:type_name -> buildbarn.configuration.blobstore.BlobstoreConfiguration
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() {
